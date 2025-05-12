@@ -3,7 +3,7 @@ const https = require('https');
 const querystring = require('querystring');
 const url = require('url');
 const crypto = require('crypto');
-const {client_id, client_secret, scope} = require('./auth/credentials.json');
+const {client_id, client_secret, scope, gemini_key} = require('./auth/credentials.json');
 
 const PORT = 3000;
 const HOST = 'localhost';
@@ -24,10 +24,9 @@ function listen_handler(){
 }
 
 function request_handler(req, res){
+    console.log(`new request: ${req.url}`);
     if (req.url === '/') {
-        // create task and get user authorization
-
-
+        requestOpenAIImage(res);
     } else if (req.url.startsWith('/oauth/callback')) {
         // get code and verify state
         const { code, state } = url.parse(req.url, true).query;
@@ -46,7 +45,41 @@ function request_handler(req, res){
     }
 }
 
+function requestOpenAIImage(res){
+    const prompt = 'A picture of a cat';
+    const requestData = JSON.stringify({
+        contents: [
+            {
+                parts: [{ text: prompt }]
+            }
+        ],
+        generationConfig: {
+            responseModalities: ["TEXT", "IMAGE"]
+        }
+    });
 
+    const options = {
+        hostname: 'generativelanguage.googleapis.com',
+        path: '/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=' + gemini_key,
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(requestData)
+        }
+    };
+    https.request(options, (data) => processStream(data, parseGeminiImage, res)).end(requestData);
+}
+
+function parseGeminiImage(body, res){
+    try{
+        const json = JSON.parse(body);
+        const base64Image = json.candidates[0].content.parts[1].inlineData.data;
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(`<h1>Image Created</h1><img src="data:image/png;base64,${base64Image}" alt="image" />`);
+    } catch (e) {
+        console.log(e);
+    }
+}
 
 function getCodeFromGithub(res){
     const state = createTask('Hello World');

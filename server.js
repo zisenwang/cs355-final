@@ -1,108 +1,171 @@
 const http = require('http');
 const https = require('https');
 const querystring = require('querystring');
+const url = require('url');
+const crypto = require('crypto');
+const {client_id, client_secret, scope} = require('./auth/credentials.json');
 
 const PORT = 3000;
+const HOST = 'localhost';
+const redirect_uri = `http://${HOST}:${PORT}/oauth/callback`;
 
-// 创建服务器
-const server = http.createServer((req, res) => {
-    if (req.method === 'GET') {
-        // 访问主页，返回HTML表单
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(`
-      <html>
-        <body>
-          <form method="POST" action="/">
-            <input name="keyword" placeholder="Enter a keyword" required>
-            <button type="submit">Search</button>
-          </form>
-        </body>
-      </html>
-    `);
-    } else if (req.method === 'POST') {
-        // 处理表单提交
-        let body = '';
+const taskList = []
 
-        req.on('data', chunk => {
-            body += chunk.toString();
-        });
+const server = http.createServer();
 
-        req.on('end', () => {
-            const formData = querystring.parse(body);
-            const keyword = formData.keyword;
+server.on('listening', listen_handler)
+server.on('request', request_handler)
+server.listen(PORT);
 
-            // 现在你拿到了用户输入的keyword，可以开始发第一个API请求了
-            console.log('Received keyword:', keyword);
+function listen_handler(){
+    console.log(`Now Listening on Port ${PORT}`);
+    console.log(server.address());
+    console.log(`Server running at: http://${HOST}:${PORT}`);
+}
 
-            // ===== 第一个API请求示例 =====
-            const api1Options = {
-                hostname: 'api.example.com',  // 这里改成你的API地址
-                path: `/search?q=${encodeURIComponent(keyword)}`,
-                method: 'GET'
-            };
+function request_handler(req, res){
+    if (req.url === '/') {
+        // create task and get user authorization
+        const state = createTask('Hello World');
+        redirectToGithubAuth(state, res);
 
-            const api1Req = https.request(api1Options, api1Res => {
-                let api1Data = '';
+    } else if (req.url.startsWith('/oauth/callback')) {
+        // get code and verify state
+        const { code, state } = url.parse(req.url, true).query;
+        console.log("code: ", code, ", state: ", state);
+        let task = taskList.find(task => task.state === state);
+        if (!code || !state || !task) {
+            notFound(res);
+            return;
+        }
 
-                api1Res.on('data', chunk => {
-                    api1Data += chunk;
-                });
+        // request for access token
+        requestAccessToken(code, getUsernameAndUpload, res);
 
-                api1Res.on('end', () => {
-                    console.log('API 1 response:', api1Data);
-
-                    // ===== 第二个API请求示例（依赖第一个API的结果） =====
-                    const api2Options = {
-                        hostname: 'api.example2.com',  // 这里改成你的第二个API地址
-                        path: `/something?info=${encodeURIComponent(api1Data)}`,
-                        method: 'GET'
-                    };
-
-                    const api2Req = https.request(api2Options, api2Res => {
-                        let api2Data = '';
-
-                        api2Res.on('data', chunk => {
-                            api2Data += chunk;
-                        });
-
-                        api2Res.on('end', () => {
-                            console.log('API 2 response:', api2Data);
-
-                            // 最终把合并后的结果返回给浏览器
-                            res.writeHead(200, { 'Content-Type': 'text/html' });
-                            res.end(`
-                <html>
-                  <body>
-                    <h1>Results</h1>
-                    <pre>${api2Data}</pre>
-                    <a href="/">Search again</a>
-                  </body>
-                </html>
-              `);
-                        });
-                    });
-
-                    api2Req.on('error', error => {
-                        console.error(error);
-                    });
-
-                    api2Req.end();
-                });
-            });
-
-            api1Req.on('error', error => {
-                console.error(error);
-            });
-
-            api1Req.end();
-        });
     } else {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('404 Not Found');
+        notFound(res)
     }
-});
+}
 
-// 启动服务器
-server.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}/`);
-});
+function generateRandomString(length) {
+    return crypto.randomBytes(length).toString('hex');
+}
+
+function processStream(stream, callback, ...args){
+    let body = '';
+    stream.on('data', chunk => (body += chunk));
+    stream.on('end', () => callback(body, ...args));
+}
+
+function requestAccessToken(code, callback, res){
+    const tokenData = querystring.stringify({
+        client_id,
+        client_secret,
+        code,
+        redirect_uri
+    });
+
+    const options = {
+        hostname: 'github.com',
+        path: '/login/oauth/access_token',
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json',
+            'Content-Length': Buffer.byteLength(tokenData)
+        }
+    }
+    const tokenReq = https.request(options,
+        (tokenRes) => processStream(tokenRes, getUsernameAndUpload, res))
+        .end(tokenData);
+
+    tokenReq.on('error', err => error(res, err));
+}
+
+function createTask(task) {
+    let state = generateRandomString(16);
+    taskList.push({task, state});
+    return state;
+}
+
+function getUsernameAndUpload(body, res) {
+    const {access_token} = JSON.parse(body);
+    const options = {
+        hostname: 'api.github.com',
+        path: '/user',
+        method: 'GET',
+        headers: {
+            'User-Agent': 'node-oauth-app',
+            'X-GitHub-Api-Version': '2022-11-28',
+            'Authorization': `token ${access_token}`,
+            'Accept': 'application/vnd.github+json'
+        }
+    };
+    const req = https.request(options,
+        (data) => processStream(data, uploadFile, access_token, res));
+
+    req.on('error', err => error(res, err));
+    req.end();
+}
+
+function redirectToGithubAuth(state, res){
+    const authEndpoint = `https://github.com/login/oauth/authorize`;
+    const uri = querystring.stringify({client_id, redirect_uri, state, scope});
+    const authURL = `${authEndpoint}?${uri}`;
+    console.log('authURL', authURL);
+    res.writeHead(302, { Location: authURL });
+    res.end();
+}
+
+
+function uploadFile(body, token, res) {
+    const repo = 'test-upload-repo'; // 你要上传到的 repo
+    const path = 'hello.txt';
+    const content = Buffer.from('Hello from OAuth app!').toString('base64');
+    const {login} = JSON.parse(body)
+
+    const data = JSON.stringify({
+        message: 'add hello.txt',
+        content,
+        branch: 'main'
+    });
+
+    const options = {
+        hostname: 'api.github.com',
+        path: `/repos/${login}/${repo}/contents/${path}`,
+        method: 'PUT',
+        headers: {
+            'User-Agent': 'node-oauth-app',
+            'Authorization': `token ${token}`,
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(data),
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+        }
+    };
+
+    const req = https.request(options, githubRes => {
+        let body = '';
+        githubRes.on('data', chunk => (body += chunk));
+        githubRes.on('end', () => {
+            res.writeHead(200, { 'Content-Type': 'text/html' });
+            res.end('<h1>Upload success!</h1><pre>' + body + '</pre>');
+        });
+    });
+
+    req.on('error', err => error(res, err));
+    req.write(data);
+    req.end();
+
+}
+
+function notFound(res){
+    res.writeHead(404, {"Content-Type": "text/html"});
+    res.end(`<h1>404 Not Found</h1>`);
+}
+
+function error(res, err){
+    res.writeHead(500, {"Content-Type": "text/html"});
+    res.write(`<h1>500 Internal Server Error</h1>`);
+    res.end(`<p>message: ${err}</p>`);
+}

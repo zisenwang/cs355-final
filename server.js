@@ -26,8 +26,7 @@ function listen_handler(){
 function request_handler(req, res){
     if (req.url === '/') {
         // create task and get user authorization
-        const state = createTask('Hello World');
-        redirectToGithubAuth(state, res);
+
 
     } else if (req.url.startsWith('/oauth/callback')) {
         // get code and verify state
@@ -45,6 +44,13 @@ function request_handler(req, res){
     } else {
         notFound(res)
     }
+}
+
+
+
+function getCodeFromGithub(res){
+    const state = createTask('Hello World');
+    redirectToGithubAuth(state, res);
 }
 
 function generateRandomString(length) {

@@ -14,25 +14,26 @@ const taskList = []
 
 const server = http.createServer();
 
-server.on('listening', listen_handler)
-server.on('request', request_handler)
+server.on('listening', listenHandler)
+server.on('request', requestHandler)
 server.listen(PORT);
 
-function listen_handler(){
+function listenHandler(){
     console.log(`Now Listening on Port ${PORT}`);
     console.log(server.address());
     console.log(`Server running at: http://${HOST}:${PORT}`);
 }
 
-function request_handler(req, res){
+function requestHandler(req, res){
     console.log(`new request: ${req.url}`);
     if (req.url === '/') {
         sendFormToUser(res);
     } else if (req.url.startsWith('/oauth/callback')) {
-        getAccessTokenAndUpload(res);
+        getAccessTokenAndUpload(req, res);
     } else if (req.url.startsWith('/image')) {
         createImageTask(req, res);
     } else {
+        console.log('an invalid request was made:');
         notFound(res)
     }
 }
@@ -43,6 +44,7 @@ function getAccessTokenAndUpload(req, res){
     console.log("code: ", code, ", state: ", state);
     let task = taskList.find(task => task.state === state);
     if (!code || !state || !task) {
+        console.log('invalid code, state, or task:', code, state, task);
         notFound(res);
         return;
     }
@@ -52,8 +54,9 @@ function getAccessTokenAndUpload(req, res){
 }
 function createImageTask(req,res){
     let input = url.parse(req.url, true).query;
-    console.log(input);
+    console.log('user input', input);
     if (!input.prompt || !input.repo) {
+        console.log('invalid input');
         notFound(res);
         return;
     }
@@ -94,6 +97,7 @@ function requestOpenAIImage(prompt, repo, res){
 function parseGeminiImageAndUpload(body, repo, res){
     try{
         const json = JSON.parse(body);
+        console.log('gemini res:',json);
         const base64Image = json.candidates[0].content.parts[1].inlineData.data;
         getCodeFromGithub(base64Image, repo, res)
     } catch (e) {
@@ -102,7 +106,7 @@ function parseGeminiImageAndUpload(body, repo, res){
 }
 
 function getCodeFromGithub(img, repo, res){
-    const state = createTask('Hello World');
+    const state = createTask(img, repo);
     redirectToGithubAuth(state, res);
 }
 
@@ -212,14 +216,15 @@ function uploadFile(body, token, task, res) {
 }
 
 function handleUploadRes(body, img, res) {
+    body = JSON.parse(body);
     console.log('upload message:', body)
     if (body.message === 'Not Found') {
         notFound(res);
         return;
     }
     res.writeHead(200, {"Content-Type": "text/html"});
-    res.write(`<h1>Following image is uploaded</h1>`);
-    res.write(`<pre>Location: ${body}</pre>`);
+    res.write(`<h1>Following Image Is Uploaded!</h1>`);
+    res.write(`<pre>Location: ${body.content.html_url}</pre>`);
     res.write(`<img src="data:image/png;base64,${img}" alt="Generated Img"/>`);
     res.end();
 }

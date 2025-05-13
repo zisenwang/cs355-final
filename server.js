@@ -153,6 +153,8 @@ function createTask(img, repo) {
 
 function getUsernameAndUpload(body, task, res) {
     const {access_token} = JSON.parse(body);
+    console.log('token body', body);
+    console.log('access_token', access_token);
     const options = {
         hostname: 'api.github.com',
         path: '/user',
@@ -182,6 +184,7 @@ function redirectToGithubAuth(state, res){
 
 
 function uploadFile(body, token, task, res) {
+    console.log('user body', body);
     const {repo, img, state} = task;
     const filename = state + '.png';
     const {login} = JSON.parse(body)

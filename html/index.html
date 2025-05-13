@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Action Form</title>
+    <style>
+        body, form{
+            margin:20px auto;
+            max-width:800px;
+            overflow-x:hidden;
+        }
+        fieldset{
+            display: flex;
+            border:none;
+        }
+        input{
+            flex-grow:100;
+        }
+        h1{
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Generate an image and upload to your Github!</h1>
+    <form action="/image" method="get">
+        <fieldset>
+            <label for="prompt">Image prompt:</label><br />
+            <input id="prompt" name="name" type="text" />
+        </fieldset>
+        <fieldset>
+            <label for="repo">Your Github Repo Name:</label><br />
+            <input id="repo" name="repo" type="text" />
+        </fieldset>
+        <fieldset>
+            <input type="submit" value="Generate Image" />
+        </fieldset>
+    </form>
+</body>
+</html>
